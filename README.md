@@ -1,12 +1,12 @@
 # Zabbix Agent 2 Plugin: Segi9
 
-This is a loadable plugin for Zabbix Agent 2, designed to make HTTP/HTTPS requests to localhost services (like Elasticsearch, NATS, etc.) and return the raw JSON status response.
+This is a loadable plugin for Zabbix Agent 2, designed to make HTTP/HTTPS requests to any reachable service (localhost or remote) and return the raw JSON status response.
 
 ## Features
 
-- **Metric**: `segi9.local.http`
+- **Metric**: `segi9.http`
 - **Dynamic Parameters**: URL, Auth Type, Username/Token, Password.
-- **TLS Security**: Automatically skips SSL/TLS verification (`InsecureSkipVerify: true`) to support self-signed certificates on localhost.
+- **TLS Security**: Automatically skips SSL/TLS verification (`InsecureSkipVerify: true`) to support self-signed certificates.
 - **Authentication**: Supports `Basic` and `Bearer` authentication.
 - **Output**: Returns the raw JSON body as a string (parsing is handled by Zabbix Server via JSONPath/LLD).
 
