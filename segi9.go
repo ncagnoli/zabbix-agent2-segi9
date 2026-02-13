@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.zabbix.com/sdk/conf"
 	"golang.zabbix.com/sdk/plugin"
 )
 
@@ -143,8 +145,28 @@ func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interfac
 	}
 
 	logMsg("Configure called")
+
+	// Initialize with defaults
+	if err := conf.Unmarshal(nil, &p.config); err != nil {
+		logMsg("Failed to set default config: %v", err)
+	}
+
 	if privateOptions != nil {
-		p.config = *privateOptions.(*Config)
+		if config, ok := privateOptions.(*Config); ok {
+			p.config = *config
+		} else if privateMap, ok := privateOptions.(map[string]interface{}); ok {
+			logMsg("Configuration passed as map, converting via JSON")
+			jsonBytes, err := json.Marshal(privateMap)
+			if err == nil {
+				if err = json.Unmarshal(jsonBytes, &p.config); err != nil {
+					logMsg("Failed to unmarshal JSON config: %v", err)
+				}
+			} else {
+				logMsg("Failed to marshal config map: %v", err)
+			}
+		} else {
+			logMsg("Unknown configuration type: %T", privateOptions)
+		}
 	}
 
 	// If timeout is not set in private options, use global timeout
@@ -165,6 +187,32 @@ func (p *Plugin) Validate(privateOptions interface{}) error {
 	} else {
 		log.Println("Validate called")
 	}
+
+	var cfg Config
+	// Initialize with defaults
+	if err := conf.Unmarshal(nil, &cfg); err != nil {
+		return fmt.Errorf("failed to set default config: %w", err)
+	}
+
+	if privateOptions != nil {
+		if config, ok := privateOptions.(*Config); ok {
+			cfg = *config
+		} else if privateMap, ok := privateOptions.(map[string]interface{}); ok {
+			jsonBytes, err := json.Marshal(privateMap)
+			if err != nil {
+				return fmt.Errorf("failed to marshal config map: %w", err)
+			}
+			if err = json.Unmarshal(jsonBytes, &cfg); err != nil {
+				return fmt.Errorf("failed to unmarshal JSON config: %w", err)
+			}
+
+			// Manual validation for range
+			if cfg.Timeout < 1 || cfg.Timeout > 30 {
+				return fmt.Errorf("invalid timeout: %d (must be between 1 and 30)", cfg.Timeout)
+			}
+		}
+	}
+
 	return nil
 }
 
