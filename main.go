@@ -58,6 +58,16 @@ func runPluginMode() {
 
 	log.Printf("Starting Segi9 plugin. Args: %v", os.Args)
 
+	// Ensure cleanup of the socket file on exit
+	if len(os.Args) > 1 {
+		socket := os.Args[1]
+		defer func() {
+			if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
+				log.Printf("Failed to remove socket %s: %v", socket, err)
+			}
+		}()
+	}
+
 	h, err := container.NewHandler(impl.Name())
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to create plugin handler %s", err.Error())

@@ -36,15 +36,18 @@ func TestPlugin_Export(t *testing.T) {
 	defer ts.Close()
 
 	p := &Plugin{
-		config: Config{Timeout: 5},
+		config: Config{Timeout: 5, SkipVerify: true},
 	}
 
+	falseVal := false
+
 	tests := []struct {
-		name    string
-		key     string
-		params  []string
-		want    string
-		wantErr bool
+		name       string
+		key        string
+		params     []string
+		want       string
+		wantErr    bool
+		skipVerify *bool
 	}{
 		{
 			name:   "Success No Auth",
@@ -88,10 +91,26 @@ func TestPlugin_Export(t *testing.T) {
 			params: []string{ts.URL + "/404"},
 			want:   `{"status":"not found"}`,
 		},
+		{
+			name:       "Secure Fail SelfSigned",
+			key:        "segi9.http",
+			params:     []string{ts.URL},
+			wantErr:    true,
+			skipVerify: &falseVal,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Update config for test case
+			p.mu.Lock()
+			if tt.skipVerify != nil {
+				p.config.SkipVerify = *tt.skipVerify
+			} else {
+				p.config.SkipVerify = true // Default for tests with self-signed cert
+			}
+			p.mu.Unlock()
+
 			got, err := p.Export(tt.key, tt.params, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Plugin.Export() error = %v, wantErr %v", err, tt.wantErr)

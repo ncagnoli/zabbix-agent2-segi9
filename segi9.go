@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.zabbix.com/sdk/conf"
@@ -19,11 +20,13 @@ import (
 type Plugin struct {
 	plugin.Base
 	config Config
+	mu     sync.RWMutex
 }
 
 // Config stores the configuration for the plugin
 type Config struct {
-	Timeout int `conf:"optional,range=1:30,default=10"`
+	Timeout    int  `conf:"optional,range=1:30,default=10"`
+	SkipVerify bool `conf:"optional,default=false"`
 }
 
 var impl Plugin
@@ -69,14 +72,20 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		logMsg("Password provided (masked)")
 	}
 
-	// Create HTTP client with insecure skip verify
+	// Capture config with read lock
+	p.mu.RLock()
+	timeoutVal := p.config.Timeout
+	skipVerify := p.config.SkipVerify
+	p.mu.RUnlock()
+
+	// Create HTTP client
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: skipVerify},
 	}
 
 	// Use configured timeout or default to 10s if 0
-	timeout := time.Duration(p.config.Timeout) * time.Second
-	if p.config.Timeout == 0 {
+	timeout := time.Duration(timeoutVal) * time.Second
+	if timeoutVal == 0 {
 		timeout = 10 * time.Second
 	}
 
@@ -85,7 +94,7 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		Timeout:   timeout,
 	}
 
-	logMsg("Creating request to %s with timeout %v", url, timeout)
+	logMsg("Creating request to %s with timeout %v, SkipVerify: %v", url, timeout, skipVerify)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -146,6 +155,9 @@ func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interfac
 
 	logMsg("Configure called")
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	// Initialize with defaults
 	if err := conf.Unmarshal(nil, &p.config); err != nil {
 		logMsg("Failed to set default config: %v", err)
@@ -173,7 +185,7 @@ func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interfac
 	if global != nil && p.config.Timeout == 0 && global.Timeout > 0 {
 		p.config.Timeout = global.Timeout
 	}
-	logMsg("Configuration set: Timeout=%d", p.config.Timeout)
+	logMsg("Configuration set: Timeout=%d, SkipVerify=%v", p.config.Timeout, p.config.SkipVerify)
 }
 
 // Validate implements the Configurator interface
