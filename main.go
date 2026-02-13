@@ -5,11 +5,19 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
-	"git.zabbix.com/ap/plugin-support/plugin/container"
+	"golang.zabbix.com/sdk/plugin/container"
 )
 
 func main() {
+	// Check if running as a plugin (arguments present and first argument is not a flag)
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
+		runPluginMode()
+		return
+	}
+
+	// Manual mode configuration
 	var (
 		manualURL = flag.String("manual", "", "Execute manually with the given URL")
 		authType  = flag.String("auth", "none", "Authentication type (none, basic, bearer)")
@@ -18,23 +26,35 @@ func main() {
 	)
 	flag.Parse()
 
+	// Configure logging for manual mode (optional, useful for debugging)
+	configureLogging()
+
+	if *manualURL != "" {
+		runManualMode(*manualURL, *authType, *username, *password)
+	} else {
+		flag.Usage()
+		os.Exit(1)
+	}
+}
+
+func configureLogging() {
 	// Default log output is stderr.
-	log.SetOutput(os.Stderr)
+	// log.SetOutput(os.Stderr) // Removed to avoid potential blocking issues in plugin mode, defaults to stderr anyway
 
 	if logPath := os.Getenv("SEGI9_LOG_FILE"); logPath != "" {
 		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Printf("Failed to open log file %s: %v. Logging to stderr.", logPath, err)
 		} else {
-			defer f.Close()
+			// Note: We can't defer f.Close() here because it would close immediately.
+			// Ideally, we should keep it open. For now, we rely on OS to close it on exit.
 			log.SetOutput(f)
 		}
 	}
+}
 
-	if *manualURL != "" {
-		runManualMode(*manualURL, *authType, *username, *password)
-		return
-	}
+func runPluginMode() {
+	configureLogging()
 
 	log.Printf("Starting Segi9 plugin. Args: %v", os.Args)
 
@@ -44,7 +64,7 @@ func main() {
 		log.Println(errMsg)
 		panic(errMsg)
 	}
-	impl.Logger = &h
+	impl.Logger = h
 
 	log.Println("Handler created, executing...")
 
@@ -58,6 +78,9 @@ func main() {
 }
 
 func runManualMode(url, authType, username, password string) {
+	// Force Logger to nil so Export uses standard log (stderr)
+	impl.Logger = nil
+
 	params := []string{url}
 	if authType != "none" {
 		params = append(params, authType, username, password)

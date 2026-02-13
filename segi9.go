@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/plugin"
+	"golang.zabbix.com/sdk/plugin"
 )
 
 // Plugin defines the structure of the plugin
@@ -28,34 +28,43 @@ var impl Plugin
 
 // Export implements the Exporter interface
 func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider) (interface{}, error) {
-	log.Printf("Export called with key: %s, params count: %d", key, len(params))
+	// Use p.Logger if available, falling back to log (stderr) if not (e.g. manual mode or not yet initialized)
+	logMsg := func(format string, args ...interface{}) {
+		if p.Logger != nil {
+			p.Logger.Infof(format, args...)
+		} else {
+			log.Printf(format, args...)
+		}
+	}
+
+	logMsg("Export called with key: %s, params count: %d", key, len(params))
 
 	if len(params) < 1 {
-		log.Println("Error: missing URL parameter")
+		logMsg("Error: missing URL parameter")
 		return nil, errors.New("missing URL parameter")
 	}
 
 	url := params[0]
 	if url == "" {
-		log.Println("Error: URL cannot be empty")
+		logMsg("Error: URL cannot be empty")
 		return nil, errors.New("URL cannot be empty")
 	}
-	log.Printf("URL: %s", url)
+	logMsg("URL: %s", url)
 
 	authType := "none"
 	if len(params) > 1 && params[1] != "" {
 		authType = strings.ToLower(params[1])
-		log.Printf("AuthType: %s", authType)
+		logMsg("AuthType: %s", authType)
 	}
 
 	var usernameOrToken, password string
 	if len(params) > 2 {
 		usernameOrToken = params[2]
-		log.Println("Username/Token provided (masked)")
+		logMsg("Username/Token provided (masked)")
 	}
 	if len(params) > 3 {
 		password = params[3]
-		log.Println("Password provided (masked)")
+		logMsg("Password provided (masked)")
 	}
 
 	// Create HTTP client with insecure skip verify
@@ -74,11 +83,11 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		Timeout:   timeout,
 	}
 
-	log.Printf("Creating request to %s with timeout %v", url, timeout)
+	logMsg("Creating request to %s with timeout %v", url, timeout)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Printf("Failed to create request: %v", err)
+		logMsg("Failed to create request: %v", err)
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -93,27 +102,27 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 	case "none":
 		// Do nothing
 	default:
-		log.Printf("Unsupported auth type: %s", authType)
+		logMsg("Unsupported auth type: %s", authType)
 		return nil, fmt.Errorf("unsupported auth type: %s", authType)
 	}
 
-	log.Printf("Sending %s request to %s...", req.Method, req.URL.String())
+	logMsg("Sending %s request to %s...", req.Method, req.URL.String())
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Request failed: %v", err)
+		logMsg("Request failed: %v", err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	log.Printf("Response received: Status %s, StatusCode %d", resp.Status, resp.StatusCode)
-	log.Println("Reading response body...")
+	logMsg("Response received: Status %s, StatusCode %d", resp.Status, resp.StatusCode)
+	logMsg("Reading response body...")
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Failed to read response body: %v", err)
+		logMsg("Failed to read response body: %v", err)
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	log.Printf("Body read successfully (%d bytes)", len(body))
+	logMsg("Body read successfully (%d bytes)", len(body))
 
 	// Return the raw JSON string regardless of status code, unless it's empty
 	return string(body), nil
@@ -121,7 +130,19 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 
 // Configure implements the Configurator interface
 func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interface{}) {
-	log.Println("Configure called")
+	// Configure logging is tricky here because impl.Logger is set in main.
+	// But p is the receiver.
+	// p.Logger is available.
+
+	logMsg := func(format string, args ...interface{}) {
+		if p.Logger != nil {
+			p.Logger.Infof(format, args...)
+		} else {
+			log.Printf(format, args...)
+		}
+	}
+
+	logMsg("Configure called")
 	if privateOptions != nil {
 		p.config = *privateOptions.(*Config)
 	}
@@ -130,12 +151,20 @@ func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interfac
 	if global != nil && p.config.Timeout == 0 && global.Timeout > 0 {
 		p.config.Timeout = global.Timeout
 	}
-	log.Printf("Configuration set: Timeout=%d", p.config.Timeout)
+	logMsg("Configuration set: Timeout=%d", p.config.Timeout)
 }
 
 // Validate implements the Configurator interface
 func (p *Plugin) Validate(privateOptions interface{}) error {
-	log.Println("Validate called")
+	// Validate is called before Logger might be set?
+	// Usually Configure -> Validate -> Export.
+	// But main sets Logger before Execute.
+	// So Logger should be available.
+	if p.Logger != nil {
+		p.Logger.Infof("Validate called")
+	} else {
+		log.Println("Validate called")
+	}
 	return nil
 }
 
