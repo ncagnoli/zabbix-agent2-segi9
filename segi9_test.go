@@ -23,6 +23,11 @@ func TestPlugin_Export(t *testing.T) {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
+		} else if r.URL.Path == "/404" {
+			w.WriteHeader(http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "not found"})
+			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -76,6 +81,12 @@ func TestPlugin_Export(t *testing.T) {
 			key:     "segi9.http",
 			params:  []string{"://invalid-url"},
 			wantErr: true,
+		},
+		{
+			name:   "Success 404 Response",
+			key:    "segi9.http",
+			params: []string{ts.URL + "/404"},
+			want:   `{"status":"not found"}`,
 		},
 	}
 

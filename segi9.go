@@ -97,7 +97,7 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		return nil, fmt.Errorf("unsupported auth type: %s", authType)
 	}
 
-	log.Println("Sending request...")
+	log.Printf("Sending %s request to %s...", req.Method, req.URL.String())
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Request failed: %v", err)
@@ -105,7 +105,8 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 	}
 	defer resp.Body.Close()
 
-	log.Println("Request successful, reading body...")
+	log.Printf("Response received: Status %s, StatusCode %d", resp.Status, resp.StatusCode)
+	log.Println("Reading response body...")
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("Failed to read response body: %v", err)
