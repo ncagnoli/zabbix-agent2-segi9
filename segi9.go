@@ -31,6 +31,24 @@ type Config struct {
 
 var impl Plugin
 
+// Start implements the Starter interface
+func (p *Plugin) Start() {
+	if p.Logger != nil {
+		p.Logger.Infof("Segi9 plugin started")
+	} else {
+		log.Println("Segi9 plugin started")
+	}
+}
+
+// Stop implements the Stopper interface
+func (p *Plugin) Stop() {
+	if p.Logger != nil {
+		p.Logger.Infof("Segi9 plugin stopped")
+	} else {
+		log.Println("Segi9 plugin stopped")
+	}
+}
+
 // Export implements the Exporter interface
 func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider) (interface{}, error) {
 	// Use p.Logger if available, falling back to log (stderr) if not (e.g. manual mode or not yet initialized)
@@ -141,10 +159,6 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 
 // Configure implements the Configurator interface
 func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interface{}) {
-	// Configure logging is tricky here because impl.Logger is set in main.
-	// But p is the receiver.
-	// p.Logger is available.
-
 	logMsg := func(format string, args ...interface{}) {
 		if p.Logger != nil {
 			p.Logger.Infof(format, args...)
@@ -158,7 +172,7 @@ func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interfac
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Initialize with defaults
+	// Initialize with defaults first
 	if err := conf.Unmarshal(nil, &p.config); err != nil {
 		logMsg("Failed to set default config: %v", err)
 	}
@@ -167,41 +181,55 @@ func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interfac
 		if config, ok := privateOptions.(*Config); ok {
 			p.config = *config
 		} else if privateMap, ok := privateOptions.(map[string]interface{}); ok {
-			logMsg("Configuration passed as map, converting via JSON")
+			logMsg("Configuration passed as map: %v", privateMap)
+			// Marshal map to JSON
 			jsonBytes, err := json.Marshal(privateMap)
-			if err == nil {
+			if err != nil {
+				logMsg("Failed to marshal config map: %v", err)
+			} else {
+				// Unmarshal JSON to struct.
+				// Note: This overwrites only fields present in the map.
 				if err = json.Unmarshal(jsonBytes, &p.config); err != nil {
 					logMsg("Failed to unmarshal JSON config: %v", err)
 				}
-			} else {
-				logMsg("Failed to marshal config map: %v", err)
 			}
 		} else {
 			logMsg("Unknown configuration type: %T", privateOptions)
 		}
 	}
 
-	// If timeout is not set in private options, use global timeout
-	if global != nil && p.config.Timeout == 0 && global.Timeout > 0 {
-		p.config.Timeout = global.Timeout
+	// Apply global timeout if local timeout is invalid (0) or if we wanted to support inheritance.
+	// Since default is 10, p.config.Timeout is usually >= 1.
+	// If the user explicitly set 0 (which Validate should catch, but let's be safe), use global.
+	if global != nil && global.Timeout > 0 {
+		if p.config.Timeout == 0 {
+			p.config.Timeout = global.Timeout
+		}
 	}
+
+	// Final safeguard: ensure timeout is at least 1 second
+	if p.config.Timeout < 1 {
+		p.config.Timeout = 1
+		logMsg("Warning: Timeout corrected to minimum 1s")
+	}
+
 	logMsg("Configuration set: Timeout=%d, SkipVerify=%v", p.config.Timeout, p.config.SkipVerify)
 }
 
 // Validate implements the Configurator interface
 func (p *Plugin) Validate(privateOptions interface{}) error {
-	// Validate is called before Logger might be set?
-	// Usually Configure -> Validate -> Export.
-	// But main sets Logger before Execute.
-	// So Logger should be available.
-	if p.Logger != nil {
-		p.Logger.Infof("Validate called")
-	} else {
-		log.Println("Validate called")
+	logMsg := func(format string, args ...interface{}) {
+		if p.Logger != nil {
+			p.Logger.Debugf(format, args...)
+		} else {
+			log.Printf(format, args...)
+		}
 	}
 
+	logMsg("Validate called")
+
 	var cfg Config
-	// Initialize with defaults
+	// Initialize with defaults first
 	if err := conf.Unmarshal(nil, &cfg); err != nil {
 		return fmt.Errorf("failed to set default config: %w", err)
 	}
@@ -217,14 +245,15 @@ func (p *Plugin) Validate(privateOptions interface{}) error {
 			if err = json.Unmarshal(jsonBytes, &cfg); err != nil {
 				return fmt.Errorf("failed to unmarshal JSON config: %w", err)
 			}
-
-			// Manual validation for range
-			if cfg.Timeout < 1 || cfg.Timeout > 30 {
-				return fmt.Errorf("invalid timeout: %d (must be between 1 and 30)", cfg.Timeout)
-			}
 		}
 	}
 
+	// Manual validation
+	if cfg.Timeout < 1 || cfg.Timeout > 30 {
+		return fmt.Errorf("invalid timeout: %d (must be between 1 and 30)", cfg.Timeout)
+	}
+
+	logMsg("Validation successful: Timeout=%d, SkipVerify=%v", cfg.Timeout, cfg.SkipVerify)
 	return nil
 }
 

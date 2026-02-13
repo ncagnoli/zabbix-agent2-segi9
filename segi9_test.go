@@ -127,3 +127,60 @@ func TestPlugin_Export(t *testing.T) {
 		})
 	}
 }
+
+func TestPlugin_Validate(t *testing.T) {
+	p := &Plugin{}
+
+	tests := []struct {
+		name    string
+		options interface{}
+		wantErr bool
+	}{
+		{
+			name:    "Nil options",
+			options: nil,
+			wantErr: false,
+		},
+		{
+			name:    "Empty map",
+			options: map[string]interface{}{},
+			wantErr: false,
+		},
+		{
+			name: "Valid Timeout",
+			options: map[string]interface{}{
+				"Timeout": 20,
+			},
+			wantErr: false,
+		},
+		{
+			name: "Invalid Timeout Low",
+			options: map[string]interface{}{
+				"Timeout": 0,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid Timeout High",
+			options: map[string]interface{}{
+				"Timeout": 31,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Valid SkipVerify",
+			options: map[string]interface{}{
+				"SkipVerify": true,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := p.Validate(tt.options); (err != nil) != tt.wantErr {
+				t.Errorf("Plugin.Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
