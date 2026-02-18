@@ -11,120 +11,121 @@ import (
 )
 
 func main() {
-	// Configure logging immediately to catch startup errors
-	configureLogging()
-
-	// Check if running as a plugin (arguments present and first argument is not a flag)
-	// Zabbix Agent 2 passes the socket path as the first argument.
+	// First check for Plugin Mode (socket path passed as first arg)
+	// This must be fast and side-effect free.
 	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
-		runPluginMode()
+		runPlugin()
 		return
 	}
 
-	// Manual mode configuration
+	// Manual Mode
+	runManual()
+}
+
+func runPlugin() {
+	// Initialize logging for plugin mode.
+	// We default to stderr (which Zabbix captures).
+	// Only use file logging if explicitly requested via env var.
+	setupPluginLogging()
+
+	// Handle socket cleanup if necessary
+	socket := os.Args[1]
+	cleanupSocket(socket)
+
+	// Create and execute the handler
+	h, err := container.NewHandler(impl.Name())
+	if err != nil {
+		log.Printf("Failed to create plugin handler: %s", err)
+		os.Exit(1)
+	}
+
+	// Set the logger for the implementation
+	impl.Logger = h
+
+	// Execute the handler. This blocks.
+	if err = h.Execute(); err != nil {
+		log.Printf("Failed to execute plugin handler: %s", err)
+		os.Exit(1)
+	}
+}
+
+func runManual() {
+	// Define flags here to avoid polluting global scope
 	var (
 		manualURL = flag.String("manual", "", "Execute manually with the given URL")
 		authType  = flag.String("auth", "none", "Authentication type (none, basic, bearer)")
 		username  = flag.String("user", "", "Username or token")
 		password  = flag.String("pass", "", "Password")
 	)
+
 	flag.Parse()
 
-	if *manualURL != "" {
-		runManualMode(*manualURL, *authType, *username, *password)
-	} else {
+	if *manualURL == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
-}
 
-func configureLogging() {
-	// Default log output is stderr.
+	// Logging for manual mode: simply stderr
 	log.SetOutput(os.Stderr)
 
-	if logPath := os.Getenv("SEGI9_LOG_FILE"); logPath != "" {
-		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Printf("Failed to open log file %s: %v. Logging to stderr.", logPath, err)
-		} else {
-			// We don't close f here; rely on OS to close on exit
-			log.SetOutput(f)
-			log.Printf("Logging initialized to file: %s", logPath)
-		}
-	}
-}
-
-func runPluginMode() {
-	log.Printf("Starting Segi9 plugin. Args: %v", os.Args)
-
-	// Ensure cleanup of the socket file on exit
-	if len(os.Args) > 1 {
-		socket := os.Args[1]
-
-		// Try to remove socket in case it was left over from a crash
-		// This is critical because net.Listen("unix", ...) fails if the file exists.
-		if info, err := os.Stat(socket); err == nil {
-			if !info.IsDir() {
-				log.Printf("Removing existing socket file: %s", socket)
-				if err := os.Remove(socket); err != nil {
-					log.Printf("Warning: Failed to remove stale socket %s: %v", socket, err)
-				}
-			} else {
-				log.Printf("Warning: Socket path %s is a directory!", socket)
-			}
-		}
-
-		defer func() {
-			if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
-				log.Printf("Failed to remove socket %s: %v", socket, err)
-			}
-		}()
-	}
-
-	// Create the handler
-	h, err := container.NewHandler(impl.Name())
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to create plugin handler %s", err.Error())
-		log.Println(errMsg)
-		panic(errMsg)
-	}
-
-	// Assign the handler to the plugin's Logger
-	impl.Logger = h
-
-	log.Println("Handler created, executing...")
-
-	// Execute the handler - this blocks until connection is closed or signal received
-	err = h.Execute()
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to execute plugin handler %s", err.Error())
-		log.Println(errMsg)
-		panic(errMsg)
-	}
-	log.Println("Plugin execution finished")
-}
-
-func runManualMode(url, authType, username, password string) {
-	// Force Logger to nil so Export uses standard log (stderr/file)
+	// Disable logger interface for manual mode so it falls back to log.Printf
 	impl.Logger = nil
 
-	log.Printf("Running in manual mode. URL: %s", url)
+	log.Printf("Running in manual mode. URL: %s", *manualURL)
 
-	params := []string{url}
-	if authType != "none" {
-		params = append(params, authType, username, password)
+	params := []string{*manualURL}
+	if *authType != "none" {
+		params = append(params, *authType, *username, *password)
 	}
 
-	// Configure default timeouts for manual mode since Configure isn't called
+	// Configure default timeouts for manual mode
 	impl.config.Timeout = 10
-	impl.config.SkipVerify = true // Default for manual mode often useful
+	impl.config.SkipVerify = true
 
-	// Passing nil for context is safe here as Export doesn't use it.
 	res, err := impl.Export("segi9.http", params, nil)
 	if err != nil {
 		log.Printf("Export failed: %v", err)
-		fmt.Printf("Error: %v\n", err) // Ensure error is printed to stdout too
+		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println(res.(string))
+}
+
+func setupPluginLogging() {
+	log.SetOutput(os.Stderr)
+
+	logPath := os.Getenv("SEGI9_LOG_FILE")
+	if logPath == "" {
+		return
+	}
+
+	// Try to open the log file. If it fails or blocks, we fallback to stderr.
+	// We do this synchronously but with a quick check if possible?
+	// Standard os.OpenFile is blocking. We accept this risk but log errors.
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("Failed to open log file %s: %v. Logging to stderr.", logPath, err)
+		return
+	}
+
+	log.SetOutput(f)
+	// We rely on OS to close the file on exit
+}
+
+func cleanupSocket(socket string) {
+	// Attempt to remove the socket file if it exists.
+	// This prevents "address already in use" errors.
+	info, err := os.Stat(socket)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("Warning: Failed to stat socket %s: %v", socket, err)
+		}
+		return
+	}
+
+	if !info.IsDir() {
+		if err := os.Remove(socket); err != nil {
+			log.Printf("Warning: Failed to remove stale socket %s: %v", socket, err)
+		}
+	}
 }
