@@ -31,63 +31,75 @@ type Config struct {
 
 var impl Plugin
 
+// Helper to log info messages safely (handles nil Logger in manual mode)
+func (p *Plugin) Infof(format string, args ...interface{}) {
+	if p.Logger != nil {
+		p.Logger.Infof(format, args...)
+	} else {
+		log.Printf(format, args...)
+	}
+}
+
+// Helper to log debug messages safely
+func (p *Plugin) Debugf(format string, args ...interface{}) {
+	if p.Logger != nil {
+		p.Logger.Debugf(format, args...)
+	} else {
+		// In manual mode, we might want to see debug logs too if verbose?
+		// For now, treat as standard log.
+		log.Printf("[DEBUG] "+format, args...)
+	}
+}
+
+// Helper to log error messages safely
+func (p *Plugin) Errorf(format string, args ...interface{}) {
+	if p.Logger != nil {
+		p.Logger.Errf(format, args...)
+	} else {
+		log.Printf("[ERROR] "+format, args...)
+	}
+}
+
 // Start implements the Starter interface
 func (p *Plugin) Start() {
-	if p.Logger != nil {
-		p.Logger.Infof("Segi9 plugin started")
-	} else {
-		log.Println("Segi9 plugin started")
-	}
+	p.Infof("Segi9 plugin started")
 }
 
 // Stop implements the Stopper interface
 func (p *Plugin) Stop() {
-	if p.Logger != nil {
-		p.Logger.Infof("Segi9 plugin stopped")
-	} else {
-		log.Println("Segi9 plugin stopped")
-	}
+	p.Infof("Segi9 plugin stopped")
 }
 
 // Export implements the Exporter interface
 func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider) (interface{}, error) {
-	// Use p.Logger if available, falling back to log (stderr) if not (e.g. manual mode or not yet initialized)
-	logMsg := func(format string, args ...interface{}) {
-		if p.Logger != nil {
-			p.Logger.Infof(format, args...)
-		} else {
-			log.Printf(format, args...)
-		}
-	}
-
-	logMsg("Export called with key: %s, params count: %d", key, len(params))
+	p.Debugf("Export called with key: %s, params count: %d", key, len(params))
 
 	if len(params) < 1 {
-		logMsg("Error: missing URL parameter")
+		p.Errorf("Error: missing URL parameter")
 		return nil, errors.New("missing URL parameter")
 	}
 
 	url := params[0]
 	if url == "" {
-		logMsg("Error: URL cannot be empty")
+		p.Errorf("Error: URL cannot be empty")
 		return nil, errors.New("URL cannot be empty")
 	}
-	logMsg("URL: %s", url)
+	p.Debugf("URL: %s", url)
 
 	authType := "none"
 	if len(params) > 1 && params[1] != "" {
 		authType = strings.ToLower(params[1])
-		logMsg("AuthType: %s", authType)
+		p.Debugf("AuthType: %s", authType)
 	}
 
 	var usernameOrToken, password string
 	if len(params) > 2 {
 		usernameOrToken = params[2]
-		logMsg("Username/Token provided (masked)")
+		p.Debugf("Username/Token provided (masked)")
 	}
 	if len(params) > 3 {
 		password = params[3]
-		logMsg("Password provided (masked)")
+		p.Debugf("Password provided (masked)")
 	}
 
 	// Capture config with read lock
@@ -112,11 +124,11 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		Timeout:   timeout,
 	}
 
-	logMsg("Creating request to %s with timeout %v, SkipVerify: %v", url, timeout, skipVerify)
+	p.Debugf("Creating request to %s with timeout %v, SkipVerify: %v", url, timeout, skipVerify)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		logMsg("Failed to create request: %v", err)
+		p.Errorf("Failed to create request: %v", err)
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -131,27 +143,27 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 	case "none":
 		// Do nothing
 	default:
-		logMsg("Unsupported auth type: %s", authType)
+		p.Errorf("Unsupported auth type: %s", authType)
 		return nil, fmt.Errorf("unsupported auth type: %s", authType)
 	}
 
-	logMsg("Sending %s request to %s...", req.Method, req.URL.String())
+	p.Debugf("Sending %s request to %s...", req.Method, req.URL.String())
 	resp, err := client.Do(req)
 	if err != nil {
-		logMsg("Request failed: %v", err)
+		p.Errorf("Request failed: %v", err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	logMsg("Response received: Status %s, StatusCode %d", resp.Status, resp.StatusCode)
-	logMsg("Reading response body...")
+	p.Debugf("Response received: Status %s, StatusCode %d", resp.Status, resp.StatusCode)
+	p.Debugf("Reading response body...")
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logMsg("Failed to read response body: %v", err)
+		p.Errorf("Failed to read response body: %v", err)
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	logMsg("Body read successfully (%d bytes)", len(body))
+	p.Debugf("Body read successfully (%d bytes)", len(body))
 
 	// Return the raw JSON string regardless of status code, unless it's empty
 	return string(body), nil
@@ -159,48 +171,39 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 
 // Configure implements the Configurator interface
 func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interface{}) {
-	logMsg := func(format string, args ...interface{}) {
-		if p.Logger != nil {
-			p.Logger.Infof(format, args...)
-		} else {
-			log.Printf(format, args...)
-		}
-	}
-
-	logMsg("Configure called")
+	p.Debugf("Configure called")
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	// Initialize with defaults first
 	if err := conf.Unmarshal(nil, &p.config); err != nil {
-		logMsg("Failed to set default config: %v", err)
+		p.Errorf("Failed to set default config: %v", err)
 	}
 
 	if privateOptions != nil {
 		if config, ok := privateOptions.(*Config); ok {
 			p.config = *config
 		} else if privateMap, ok := privateOptions.(map[string]interface{}); ok {
-			logMsg("Configuration passed as map: %v", privateMap)
+			p.Debugf("Configuration passed as map: %v", privateMap)
 			// Marshal map to JSON
 			jsonBytes, err := json.Marshal(privateMap)
 			if err != nil {
-				logMsg("Failed to marshal config map: %v", err)
+				p.Errorf("Failed to marshal config map: %v", err)
 			} else {
 				// Unmarshal JSON to struct.
 				// Note: This overwrites only fields present in the map.
 				if err = json.Unmarshal(jsonBytes, &p.config); err != nil {
-					logMsg("Failed to unmarshal JSON config: %v", err)
+					p.Errorf("Failed to unmarshal JSON config: %v", err)
 				}
 			}
 		} else {
-			logMsg("Unknown configuration type: %T", privateOptions)
+			p.Debugf("Unknown configuration type: %T", privateOptions)
 		}
 	}
 
 	// Apply global timeout if local timeout is invalid (0) or if we wanted to support inheritance.
 	// Since default is 10, p.config.Timeout is usually >= 1.
-	// If the user explicitly set 0 (which Validate should catch, but let's be safe), use global.
 	if global != nil && global.Timeout > 0 {
 		if p.config.Timeout == 0 {
 			p.config.Timeout = global.Timeout
@@ -210,23 +213,18 @@ func (p *Plugin) Configure(global *plugin.GlobalOptions, privateOptions interfac
 	// Final safeguard: ensure timeout is at least 1 second
 	if p.config.Timeout < 1 {
 		p.config.Timeout = 1
-		logMsg("Warning: Timeout corrected to minimum 1s")
+		p.Infof("Warning: Timeout corrected to minimum 1s")
 	}
 
-	logMsg("Configuration set: Timeout=%d, SkipVerify=%v", p.config.Timeout, p.config.SkipVerify)
+	p.Infof("Configuration set: Timeout=%d, SkipVerify=%v", p.config.Timeout, p.config.SkipVerify)
 }
 
 // Validate implements the Configurator interface
 func (p *Plugin) Validate(privateOptions interface{}) error {
-	logMsg := func(format string, args ...interface{}) {
-		if p.Logger != nil {
-			p.Logger.Debugf(format, args...)
-		} else {
-			log.Printf(format, args...)
-		}
-	}
-
-	logMsg("Validate called")
+	// We can't rely on p.Logger here easily because Validate might be called before Configure?
+	// Actually, Zabbix calls Validate via RPC. p.Logger should be available if connection is up.
+	// But let's be safe.
+	p.Debugf("Validate called")
 
 	var cfg Config
 	// Initialize with defaults first
@@ -253,7 +251,7 @@ func (p *Plugin) Validate(privateOptions interface{}) error {
 		return fmt.Errorf("invalid timeout: %d (must be between 1 and 30)", cfg.Timeout)
 	}
 
-	logMsg("Validation successful: Timeout=%d, SkipVerify=%v", cfg.Timeout, cfg.SkipVerify)
+	p.Debugf("Validation successful: Timeout=%d, SkipVerify=%v", cfg.Timeout, cfg.SkipVerify)
 	return nil
 }
 
@@ -263,11 +261,6 @@ func (p *Plugin) Name() string {
 }
 
 func init() {
-	// Simple init log, likely goes to stderr or lost if log output not set yet
-	// But since this runs before main, we can't rely on the file log yet.
-	// We can use fmt.Println to stderr.
-	// fmt.Fprintln(os.Stderr, "Segi9 plugin init") // Commented out to avoid noise if not needed
-
 	plugin.RegisterMetrics(&impl, "Segi9",
 		"segi9.http", "Make HTTP/HTTPS requests to any reachable service and return JSON status.")
 }
