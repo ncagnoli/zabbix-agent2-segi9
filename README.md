@@ -1,143 +1,149 @@
-# Zabbix Agent 2 Plugin: Segi9
+# zabbix-plugin-segi9
 
-This is a loadable plugin for Zabbix Agent 2, designed to make HTTP/HTTPS requests to any reachable service (localhost or remote) and return the raw JSON status response.
+Loadable plugin para o **Zabbix Agent 2** que atua como um proxy HTTP/HTTPS.  
+O agente executa a requisição **localmente** (no host onde está instalado) e devolve o corpo completo da resposta para o servidor Zabbix.
 
-## Features
+---
 
-- **Metric**: `segi9.http`
-- **Dynamic Parameters**: URL, Auth Type, Username/Token, Password.
-- **TLS Security**: Automatically skips SSL/TLS verification (`InsecureSkipVerify: true`) to support self-signed certificates, unless configured otherwise.
-- **Authentication**: Supports `Basic` and `Bearer` authentication.
-- **Output**: Returns the raw JSON body as a string.
+## Chave da métrica
 
-## Requirements
-
-- Zabbix Agent 2 (version 6.0+)
-- Go (version 1.21+ recommended for building)
-
-## Installation
-
-### 1. Build the Plugin
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd zabbix-agent2-segi9
-
-# Build the binary
-go build -o zabbix-agent2-segi9
+```
+segi9.http[<url>, <auth_type>, <user_or_token>, <password>]
 ```
 
-### 2. Deploy the Plugin
+| Parâmetro       | Obr. | Descrição                                                   |
+|-----------------|------|-------------------------------------------------------------|
+| `url`           | ✓    | URL alvo, ex: `https://api.exemplo.com/status`              |
+| `auth_type`     |      | `none` (padrão) · `basic` · `bearer`                        |
+| `user_or_token` |      | Usuário (`basic`) ou token (`bearer`)                       |
+| `password`      |      | Senha (`basic` apenas; ignorado em `bearer`)                |
 
-Move the compiled binary to a directory accessible by Zabbix Agent 2.
+### Exemplos de item keys no Zabbix
 
-```bash
-# Example directory
-mkdir -p /usr/local/zabbix/go/plugins/segi9
-mv zabbix-agent2-segi9 /usr/local/zabbix/go/plugins/segi9/
+```
+# Sem autenticação
+segi9.http[https://api.exemplo.com/status]
+
+# Basic Auth
+segi9.http[https://api.interna.com/metrics,basic,admin,s3cr3t]
+
+# Bearer Token
+segi9.http[https://api.externa.com/data,bearer,eyJhbGciOiJSUzI1NiJ9...]
 ```
 
-### 3. Configure Zabbix Agent 2
+---
 
-Copy the configuration file `segi9.conf` to the Zabbix Agent 2 plugin configuration directory (typically `/etc/zabbix/zabbix_agent2.d/plugins.d/`).
-
-```bash
-sudo cp segi9.conf /etc/zabbix/zabbix_agent2.d/plugins.d/
-```
-
-Edit the configuration file to ensure the `Path` is correct:
+## Configuração (`segi9.conf`)
 
 ```ini
-Plugins.Segi9.System.Path=/usr/local/zabbix/go/plugins/segi9/zabbix-agent2-segi9
+# Caminho para o binário do plugin (OBRIGATÓRIO)
+Plugins.Segi9.System.Path=/usr/local/lib/zabbix/plugins/zabbix-plugin-segi9
+
+# Timeout da requisição HTTP em segundos (1–30, padrão: 10)
+# Plugins.Segi9.Timeout=10
+
+# Ignorar erros de certificado TLS/SSL (padrão: false)
+# Plugins.Segi9.SkipVerify=false
 ```
 
-### 4. Restart Zabbix Agent 2
+---
+
+## Build e instalação
+
+### Pré-requisitos
+
+- Go 1.21+
+- Acesso a `git.zabbix.com` (para baixar o SDK do Zabbix)
+
+### 1 – Obter o SDK
+
+```bash
+go get golang.zabbix.com/sdk@<COMMIT_HASH>
+go mod tidy
+```
+
+> Encontre o hash mais recente da branch `release/7.4` em:  
+> https://git.zabbix.com/projects/AP/repos/plugin-support/commits?at=refs%2Fheads%2Frelease%2F7.4
+
+Ou use o atalho do Makefile:
+
+```bash
+make setup
+```
+
+### 2 – Compilar
+
+```bash
+make build
+# ou diretamente:
+go build -o zabbix-plugin-segi9 .
+```
+
+### 3 – Instalar
+
+```bash
+sudo make install
+```
+
+Isso copia o binário para `/usr/local/lib/zabbix/plugins/` e o `segi9.conf` para `/etc/zabbix/zabbix_agent2.d/`.
+
+Edite o `segi9.conf` conforme necessário e reinicie o agente:
 
 ```bash
 sudo systemctl restart zabbix-agent2
 ```
 
-## Usage
+---
 
-### Key Format
+## Modo manual (teste sem o agente)
 
-`segi9.http[<url>, <auth_type>, <username_or_token>, <password>]`
-
-- `url`: (Required) The URL to request (e.g., `https://127.0.0.1:9200/_cluster/health`).
-- `auth_type`: (Optional) `none` (default), `basic`, or `bearer`.
-- `username_or_token`: (Optional) Username for Basic Auth or Token for Bearer Auth.
-- `password`: (Optional) Password for Basic Auth.
-
-### Examples
-
-**1. Simple Request (No Auth):**
-```
-segi9.http[https://127.0.0.1:9200/_cluster/health]
-```
-
-**2. Basic Authentication:**
-```
-segi9.http[https://remote-host:9200/_cluster/health,basic,myuser,mypassword]
-```
-
-**3. Bearer Token Authentication:**
-```
-segi9.http[https://api.example.com/v1/status,bearer,my-secret-token]
-```
-
-## Configuration Options
-
-You can configure the plugin in `segi9.conf`:
-
-```ini
-# Timeout for HTTP requests (default: 10, range: 1-30)
-Plugins.Segi9.Timeout=10
-
-# Skip TLS certificate verification (default: 0)
-Plugins.Segi9.SkipVerify=0
-```
-
-## Troubleshooting & Debugging
-
-If the Zabbix Agent 2 service fails to start or reports connection errors with the plugin:
-
-### 1. Enable Debug Logging
-
-Since the plugin output is handled by Zabbix Agent, startup errors might be missed. You can force the plugin to log to a file by setting the `SEGI9_LOG_FILE` environment variable in the Zabbix Agent 2 service environment.
-
-**Method A: Edit systemd service**
-
-1.  Run `systemctl edit zabbix-agent2`
-2.  Add the following:
-    ```ini
-    [Service]
-    Environment="SEGI9_LOG_FILE=/tmp/segi9_debug.log"
-    ```
-3.  Save and exit.
-4.  Restart the service: `systemctl restart zabbix-agent2`
-5.  Check the log file: `cat /tmp/segi9_debug.log`
-
-### 2. Manual Testing
-
-You can run the plugin manually to verify it works in isolation:
+O plugin pode ser executado diretamente no terminal para depuração rápida:
 
 ```bash
-# Test with a URL (Manual Mode)
-./zabbix-agent2-segi9 -manual https://google.com
+# Sem autenticação
+./zabbix-plugin-segi9 -manual "https://api.ipify.org"
+
+# Basic Auth
+./zabbix-plugin-segi9 -manual "http://httpbin.org/basic-auth/admin/secret" \
+                      -auth basic -user admin -pass secret
+
+# Bearer Token
+./zabbix-plugin-segi9 -manual "https://httpbin.org/bearer" \
+                      -auth bearer -user "meu-token"
 ```
 
-### 3. Common Errors
+Resultado impresso direto no `stdout`. Erros vão para `stderr`.
 
-- **`failed to create connection`**:
-    -   This usually means the plugin failed to start or crashed immediately.
-    -   Check permissions: Ensure the user running `zabbix_agent2` (usually `zabbix`) has execute permissions on the plugin binary.
-    -   Check `SEGI9_LOG_FILE` for crash logs.
-    -   Ensure `Plugins.Segi9.System.Path` in `segi9.conf` points to the correct location.
+---
 
-- **`invalid timeout`**:
-    -   Ensure `Plugins.Segi9.Timeout` is between 1 and 30.
+## Estrutura do projeto
 
-## License
+```
+.
+├── main.go       ← entry point: modo plugin (Zabbix) e modo manual (-manual)
+├── plugin.go     ← lógica HTTP, interfaces Exporter / Runner / Configurator
+├── go.mod
+├── segi9.conf    ← template de configuração para o agente
+├── Makefile
+└── README.md
+```
 
-MIT
+---
+
+## Pré-processamento no Zabbix (opcional)
+
+Como o plugin retorna o **corpo bruto** da resposta, você pode usar as regras de pré-processamento do Zabbix para extrair campos específicos:
+
+| Tipo           | Expressão de exemplo                         |
+|----------------|---------------------------------------------|
+| JSONPath        | `$.status`                                  |
+| Regex          | `uptime: (\d+)`                             |
+| JavaScript     | `return JSON.parse(value).metrics.cpu_pct;` |
+
+---
+
+## Segurança
+
+- `SkipVerify=false` (padrão): certificados TLS **são** verificados.  
+- Use `SkipVerify=true` apenas em ambientes controlados (ex: monitoramento interno com certificados auto-assinados).
+- Credenciais passadas nos parâmetros da key ficam visíveis no banco de dados do Zabbix. Para ambientes sensíveis, considere usar macros secretas do Zabbix.
