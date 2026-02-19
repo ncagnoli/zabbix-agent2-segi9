@@ -1,93 +1,93 @@
 # zabbix-plugin-segi9
 
-Loadable plugin para o **Zabbix Agent 2** que atua como um proxy HTTP/HTTPS.  
-O agente executa a requisição **localmente** (no host onde está instalado) e devolve o corpo completo da resposta para o servidor Zabbix.
+Loadable plugin for **Zabbix Agent 2** that acts as an HTTP/HTTPS proxy.
+The agent executes the request **locally** (on the host where it is installed) and returns the full response body to the Zabbix server.
 
 ---
 
-## Chave da métrica
+## Metric Key
 
 ```
 segi9.http[<url>, <auth_type>, <user_or_token>, <password>]
 ```
 
-| Parâmetro       | Obr. | Descrição                                                   |
+| Parameter       | Req. | Description                                                 |
 |-----------------|------|-------------------------------------------------------------|
-| `url`           | ✓    | URL alvo, ex: `https://api.exemplo.com/status`              |
-| `auth_type`     |      | `none` (padrão) · `basic` · `bearer`                        |
-| `user_or_token` |      | Usuário (`basic`) ou token (`bearer`)                       |
-| `password`      |      | Senha (`basic` apenas; ignorado em `bearer`)                |
+| `url`           | ✓    | Target URL, e.g.: `https://api.example.com/status`          |
+| `auth_type`     |      | `none` (default) · `basic` · `bearer`                       |
+| `user_or_token` |      | Username (`basic`) or token (`bearer`)                      |
+| `password`      |      | Password (`basic` only; ignored for `bearer`)               |
 
-### Exemplos de item keys no Zabbix
+### Zabbix Item Key Examples
 
 ```
-# Sem autenticação
-segi9.http[https://api.exemplo.com/status]
+# No authentication
+segi9.http[https://api.example.com/status]
 
 # Basic Auth
-segi9.http[https://api.interna.com/metrics,basic,admin,s3cr3t]
+segi9.http[https://api.internal.com/metrics,basic,admin,s3cr3t]
 
 # Bearer Token
-segi9.http[https://api.externa.com/data,bearer,eyJhbGciOiJSUzI1NiJ9...]
+segi9.http[https://api.external.com/data,bearer,eyJhbGciOiJSUzI1NiJ9...]
 ```
 
 ---
 
-## Configuração (`segi9.conf`)
+## Configuration (`segi9.conf`)
 
 ```ini
-# Caminho para o binário do plugin (OBRIGATÓRIO)
+# Path to the plugin binary (REQUIRED)
 Plugins.Segi9.System.Path=/usr/local/lib/zabbix/plugins/zabbix-plugin-segi9
 
-# Timeout da requisição HTTP em segundos (1–30, padrão: 10)
+# HTTP request timeout in seconds (1–30, default: 10)
 # Plugins.Segi9.Timeout=10
 
-# Ignorar erros de certificado TLS/SSL (padrão: false)
+# Ignore TLS/SSL certificate errors (default: false)
 # Plugins.Segi9.SkipVerify=false
 ```
 
 ---
 
-## Build e instalação
+## Build and Installation
 
-### Pré-requisitos
+### Prerequisites
 
 - Go 1.21+
-- Acesso a `git.zabbix.com` (para baixar o SDK do Zabbix)
+- Access to `git.zabbix.com` (to download the Zabbix SDK)
 
-### 1 – Obter o SDK
+### 1 – Get the SDK
 
 ```bash
 go get golang.zabbix.com/sdk@<COMMIT_HASH>
 go mod tidy
 ```
 
-> Encontre o hash mais recente da branch `release/7.4` em:  
+> Find the latest hash for the `release/7.4` branch at:
 > https://git.zabbix.com/projects/AP/repos/plugin-support/commits?at=refs%2Fheads%2Frelease%2F7.4
 
-Ou use o atalho do Makefile:
+Or use the Makefile shortcut:
 
 ```bash
 make setup
 ```
 
-### 2 – Compilar
+### 2 – Compile
 
 ```bash
 make build
-# ou diretamente:
+# or directly:
 go build -o zabbix-plugin-segi9 .
 ```
 
-### 3 – Instalar
+### 3 – Install
 
 ```bash
 sudo make install
 ```
 
-Isso copia o binário para `/usr/local/lib/zabbix/plugins/` e o `segi9.conf` para `/etc/zabbix/zabbix_agent2.d/`.
+This copies the binary to `/usr/local/lib/zabbix/plugins/` and `segi9.conf` to `/etc/zabbix/zabbix_agent2.d/`.
 
-Edite o `segi9.conf` conforme necessário e reinicie o agente:
+Edit `segi9.conf` as needed and restart the agent:
 
 ```bash
 sudo systemctl restart zabbix-agent2
@@ -95,12 +95,12 @@ sudo systemctl restart zabbix-agent2
 
 ---
 
-## Modo manual (teste sem o agente)
+## Manual Mode (Test without Agent)
 
-O plugin pode ser executado diretamente no terminal para depuração rápida:
+The plugin can be executed directly in the terminal for quick debugging:
 
 ```bash
-# Sem autenticação
+# No authentication
 ./zabbix-plugin-segi9 -manual "https://api.ipify.org"
 
 # Basic Auth
@@ -109,32 +109,32 @@ O plugin pode ser executado diretamente no terminal para depuração rápida:
 
 # Bearer Token
 ./zabbix-plugin-segi9 -manual "https://httpbin.org/bearer" \
-                      -auth bearer -user "meu-token"
+                      -auth bearer -user "my-token"
 ```
 
-Resultado impresso direto no `stdout`. Erros vão para `stderr`.
+Result is printed directly to `stdout`. Errors go to `stderr`.
 
 ---
 
-## Estrutura do projeto
+## Project Structure
 
 ```
 .
-├── main.go       ← entry point: modo plugin (Zabbix) e modo manual (-manual)
-├── plugin.go     ← lógica HTTP, interfaces Exporter / Runner / Configurator
+├── main.go       ← entry point: plugin mode (Zabbix) and manual mode (-manual)
+├── plugin.go     ← HTTP logic, Exporter / Runner / Configurator interfaces
 ├── go.mod
-├── segi9.conf    ← template de configuração para o agente
+├── segi9.conf    ← configuration template for the agent
 ├── Makefile
 └── README.md
 ```
 
 ---
 
-## Pré-processamento no Zabbix (opcional)
+## Zabbix Preprocessing (Optional)
 
-Como o plugin retorna o **corpo bruto** da resposta, você pode usar as regras de pré-processamento do Zabbix para extrair campos específicos:
+Since the plugin returns the **raw body** of the response, you can use Zabbix preprocessing rules to extract specific fields:
 
-| Tipo           | Expressão de exemplo                         |
+| Type           | Example Expression                           |
 |----------------|---------------------------------------------|
 | JSONPath        | `$.status`                                  |
 | Regex          | `uptime: (\d+)`                             |
@@ -142,8 +142,8 @@ Como o plugin retorna o **corpo bruto** da resposta, você pode usar as regras d
 
 ---
 
-## Segurança
+## Security
 
-- `SkipVerify=false` (padrão): certificados TLS **são** verificados.  
-- Use `SkipVerify=true` apenas em ambientes controlados (ex: monitoramento interno com certificados auto-assinados).
-- Credenciais passadas nos parâmetros da key ficam visíveis no banco de dados do Zabbix. Para ambientes sensíveis, considere usar macros secretas do Zabbix.
+- `SkipVerify=false` (default): TLS certificates **are** verified.
+- Use `SkipVerify=true` only in controlled environments (e.g., internal monitoring with self-signed certificates).
+- Credentials passed in the key parameters are visible in the Zabbix database. For sensitive environments, consider using Zabbix secret macros.
